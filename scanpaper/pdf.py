@@ -6,6 +6,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfgen.canvas import Canvas
 
 from .model import PT_PER_MM
+from . import __version__
 
 
 def export_pdf(image, layout, destination):
@@ -19,7 +20,7 @@ def export_pdf(image, layout, destination):
         canvas = Canvas(temporary, pagesize=(pw * PT_PER_MM, ph * PT_PER_MM),
                         pageCompression=1, pdfVersion=(1, 4))
         canvas.setTitle(destination.stem)
-        canvas.setCreator("ScanPaper 1.0")
+        canvas.setCreator(f"ScanPaper {__version__}")
         canvas.saveState()
         clip = canvas.beginPath()
         clip.rect(0, 0, pw * PT_PER_MM, ph * PT_PER_MM)

@@ -7,6 +7,7 @@ import traceback
 
 
 def make_scan():
+    from .platform_support import resource_path
     import numpy as np
     from PIL import Image, ImageDraw, ImageFont
     width, height = 1800, 2400
@@ -15,9 +16,9 @@ def make_scan():
     image = Image.fromarray(gray).convert('RGB')
     draw = ImageDraw.Draw(image)
     try:
-        regular = ImageFont.truetype('arial.ttf', 30)
-        small = ImageFont.truetype('arial.ttf', 21)
-        heading = ImageFont.truetype('arialbd.ttf', 58)
+        regular = ImageFont.truetype(str(resource_path('assets/fonts/NotoSansCJKsc-Regular.otf')), 30)
+        small = ImageFont.truetype(str(resource_path('assets/fonts/NotoSansCJKsc-Regular.otf')), 21)
+        heading = ImageFont.truetype(str(resource_path('assets/fonts/NotoSansCJKsc-Regular.otf')), 58)
     except OSError:
         regular = small = heading = ImageFont.load_default(size=28)
     draw.text((150, 160), 'DOCUMENT / 2026', font=heading, fill=(20, 20, 20))
@@ -54,13 +55,13 @@ def run(output_directory):
     report = {'passed': False, 'checks': [], 'errors': []}
     try:
         from PySide6.QtCore import QPoint, Qt
-        from PySide6.QtGui import QFont
         from PySide6.QtTest import QTest
         from PySide6.QtWidgets import QApplication
-        from .app import MainWindow, configure_font
+        from .app import MainWindow
+        from .platform_support import configure_application
         from .model import PAPERS
         app = QApplication.instance() or QApplication([])
-        configure_font(app)
+        configure_application(app)
         window = MainWindow()
         errors = []
         window.operation_failed = lambda error: (errors.append(str(error)), window.set_busy(False, '失败'))
@@ -75,6 +76,10 @@ def run(output_directory):
                 if time.monotonic() > deadline:
                     raise TimeoutError('等待后台任务超时')
             app.processEvents()
+        from PySide6.QtGui import QRawFont
+        raw_font = QRawFont.fromFont(app.font())
+        assert raw_font.supportsCharacter(ord('净')) and raw_font.supportsCharacter(ord('页'))
+        report['checks'].append('Bundled Chinese font and platform keyboard shortcuts')
         source = output / '测试扫描件.jpg'
         make_scan().save(source, quality=96)
         window.show()

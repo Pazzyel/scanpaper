@@ -3,12 +3,13 @@ from pathlib import Path
 import sys
 
 from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
-from PySide6.QtGui import QFont, QFontDatabase, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QSlider, QVBoxLayout, QWidget)
 
 from .canvas import PaperView
+from .platform_support import configure_application, resource_path, zoom_shortcut_label
 from .model import Layout, PAPERS
 from .pdf import export_pdf
 from .processing import Cleanup, clean_image, load_jpeg, rotate_image, thumbnail
@@ -55,8 +56,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('净页 ScanPaper · 扫描件转 PDF')
-        assets = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent.parent)) / 'assets'
-        self.setWindowIcon(QIcon(str(assets / 'scanpaper.svg')))
+        self.setWindowIcon(QIcon(str(resource_path('assets/scanpaper.svg'))))
         self.resize(1280, 860)
         self.setMinimumSize(1040, 700)
         self.setAcceptDrops(True)
@@ -95,9 +95,9 @@ class MainWindow(QMainWindow):
         subtitle.setStyleSheet('color:#64748b;')
         top.addWidget(subtitle)
         top.addStretch()
-        self.import_button = QPushButton('导入图片  Ctrl+O')
+        self.import_button = QPushButton('导入图片  ' + QKeySequence(QKeySequence.StandardKey.Open).toString(QKeySequence.SequenceFormat.NativeText))
         self.import_button.clicked.connect(self.choose_image)
-        self.export_button = QPushButton('导出 PDF  Ctrl+S')
+        self.export_button = QPushButton('导出 PDF  ' + QKeySequence(QKeySequence.StandardKey.Save).toString(QKeySequence.SequenceFormat.NativeText))
         self.export_button.setObjectName('primary')
         self.export_button.clicked.connect(self.choose_export)
         self.export_button.setEnabled(False)
@@ -169,7 +169,7 @@ class MainWindow(QMainWindow):
         self.view = PaperView(self.layout_model)
         self.view.layoutChanged.connect(self.sync_layout)
         center_layout.addWidget(self.view, 1)
-        self.preview_status = QLabel('拖动图片调整位置 · 拖动四角等比例缩放 · Ctrl+滚轮缩放预览')
+        self.preview_status = QLabel('拖动图片调整位置 · 拖动四角等比例缩放 · ' + zoom_shortcut_label() + '缩放预览')
         self.preview_status.setObjectName('muted')
         self.preview_status.setWordWrap(True)
         center_layout.addWidget(self.preview_status)
@@ -256,7 +256,8 @@ class MainWindow(QMainWindow):
             QProgressBar::chunk { background:#2563eb; }
         ''')
         self.right.setEnabled(False)
-        for sequence, callback in [('Ctrl+O', self.choose_image), ('Ctrl+S', self.choose_export)]:
+        for sequence, callback in [(QKeySequence.StandardKey.Open, self.choose_image),
+                                   (QKeySequence.StandardKey.Save, self.choose_export)]:
             shortcut = QShortcut(QKeySequence(sequence), self)
             shortcut.activated.connect(callback)
 
@@ -397,7 +398,7 @@ class MainWindow(QMainWindow):
             self.view.set_image(rotate_image(image, self.layout_model.rotation))
         self.preview_status.setText(
             ('当前显示原图；导出仍使用清理结果。' if self.original_check.isChecked() else '') +
-            '拖动图片调整位置 · 拖动四角缩放 · Ctrl+滚轮缩放预览')
+            '拖动图片调整位置 · 拖动四角缩放 · ' + zoom_shortcut_label() + '缩放预览')
 
     def view_checker(self, enabled):
         self.view.set_checker(enabled)
@@ -527,22 +528,11 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def configure_font(app):
-    app.setStyle('Fusion')
-    # The offscreen Qt platform does not discover Windows fonts automatically.
-    if app.platformName() == 'offscreen':
-        import os
-        font_path = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Fonts' / 'msyh.ttc'
-        if font_path.exists():
-            QFontDatabase.addApplicationFont(str(font_path))
-    app.setFont(QFont('Microsoft YaHei UI', 9))
-
-
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName('ScanPaper')
     app.setOrganizationName('ScanPaper')
-    configure_font(app)
+    configure_application(app)
     window = MainWindow()
     window.show()
     def report_exception(kind, error, traceback):

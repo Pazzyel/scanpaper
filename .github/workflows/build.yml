@@ -1,0 +1,127 @@
+name: Build desktop apps
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: Windows-x64
+            runner: windows-2022
+            extra: ''
+          - target: macOS-arm64
+            runner: macos-15
+            extra: '--skip-source'
+          - target: macOS-x64
+            runner: macos-15-intel
+            extra: '--skip-source'
+          - target: Linux-x64
+            runner: ubuntu-22.04
+            extra: '--skip-source'
+    env:
+      PYTHONUTF8: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+      - name: Install Linux desktop libraries and virtual display
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libxcb-cursor0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-shape0 libx11-xcb1 xvfb xauth
+      - name: Install build dependencies
+        run: python -m pip install -r requirements-build.txt
+      - name: Native build, tests and archive round-trip
+        if: runner.os != 'Linux'
+        run: python tools/build.py --native-smoke ${{ matrix.extra }}
+      - name: Linux build and X11 desktop test
+        if: runner.os == 'Linux'
+        run: xvfb-run -a python tools/build.py --native-smoke ${{ matrix.extra }}
+      - name: Upload install-free packages
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: packages-${{ matrix.target }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+            release/SHA256SUMS-*.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - name: Upload verification reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: verification-${{ matrix.target }}
+          path: |
+            release/verification/
+            artifacts/portable-check-*/verification/
+            build/ScanPaper/warn-ScanPaper.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  release:
+    name: Publish verified packages
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          pattern: packages-*
+          path: release
+          merge-multiple: true
+      - name: Verify release version and checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, os
+          from scanpaper import __version__
+          assert os.environ['RELEASE_TAG'] == 'v' + __version__
+          lines = []
+          for manifest in sorted(Path('release').glob('SHA256SUMS-*.txt')):
+              for line in manifest.read_text(encoding='ascii').splitlines():
+                  digest, name = line.split('  ', 1)
+                  assert Path(name).name == name
+                  with (Path('release') / name).open('rb') as stream:
+                      assert hashlib.file_digest(stream, 'sha256').hexdigest() == digest
+                  lines.append(line)
+          assert len(lines) == 5, 'Expected four platform packages and one source ZIP'
+          Path('release/SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='ascii')
+          PY
+      - name: Publish release only after all platforms passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --verify-tag --title "净页 ScanPaper ${GITHUB_REF_NAME}" --notes-file .github/release-notes.md

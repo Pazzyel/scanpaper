@@ -1,4 +1,5 @@
-"""Reproducible Windows x64 portable build, with isolated executable smoke test."""
+"""Native Windows, macOS and Linux builds with archive round-trip verification."""
+import argparse
 import hashlib
 from importlib.metadata import distribution
 import json
@@ -8,12 +9,13 @@ import platform
 import shutil
 import subprocess
 import sys
-import time
+import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = '1.0.0'
-NAME = f'ScanPaper-{VERSION}-Windows-x64'
+sys.path.insert(0, str(ROOT))
+from scanpaper import __version__ as VERSION
+from tools.packaging_support import create_archive, extract_archive, host_target, smoke_environment
 PACKAGES = ['PySide6_Essentials', 'shiboken6', 'Pillow', 'numpy',
             'opencv-python-headless', 'reportlab', 'charset-normalizer', 'pyinstaller']
 
@@ -28,6 +30,7 @@ def prepare_licenses():
     folder.mkdir(exist_ok=True)
     lines = ['ScanPaper third-party notices', '',
              'Application source: MIT (see LICENSE).',
+             'Noto Sans CJK SC: SIL Open Font License 1.1 (see NotoSansCJK/OFL.txt).',
              'All processing is local. No online service is required.', '',
              'Runtime components and original license files:']
     for name in PACKAGES:
@@ -43,11 +46,21 @@ def prepare_licenses():
         # Preserve upstream metadata and license declarations as well.
         (folder / name).mkdir(exist_ok=True)
         (folder / name / 'METADATA.txt').write_text(package.read_text('METADATA') or '', encoding='utf-8')
-    shutil.copy2(Path(sys.base_prefix) / 'LICENSE.txt', folder / 'Python-LICENSE.txt')
+    python_license = next((path for path in (Path(sys.base_prefix) / 'LICENSE.txt',
+        Path(sys.base_prefix) / 'LICENSE', Path(sys.base_prefix) / 'lib/python3.12/LICENSE.txt')
+        if path.is_file()), None)
+    if python_license is None:
+        import sysconfig
+        python_license = Path(sysconfig.get_path('stdlib')) / 'LICENSE.txt'
+    if not python_license.is_file():
+        raise RuntimeError('Python license file was not found in this interpreter distribution')
+    shutil.copy2(python_license, folder / 'Python-LICENSE.txt')
+    (folder / 'NotoSansCJK').mkdir(exist_ok=True)
+    shutil.copy2(ROOT / 'assets/fonts/OFL.txt', folder / 'NotoSansCJK/OFL.txt')
     lines.extend(['', f'Python {platform.python_version()} (PSF license and bundled notices).', '',
         'PyInstaller is a build tool; its bootloader distribution exception applies.', '',
         'Qt / PySide6 / Shiboken6: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only.',
-        'This distribution uses the LGPL option. Libraries are supplied separately in _internal.',
+        'This distribution uses the LGPL option. Libraries are dynamically linked in the application bundle.',
         'You may replace or relink these libraries and debug modifications under the applicable licenses.',
         'Application source is supplied in the matching source ZIP. No restriction is imposed on',
         'reverse engineering for debugging modifications to LGPL-covered libraries.', '',
@@ -82,7 +95,7 @@ def prepare_icon():
     from PySide6.QtWidgets import QApplication
     from PIL import Image
     app = QApplication.instance() or QApplication([])
-    image = QImage(256, 256, QImage.Format.Format_RGBA8888)
+    image = QImage(1024, 1024, QImage.Format.Format_RGBA8888)
     image.fill(Qt.GlobalColor.transparent)
     painter = QPainter(image)
     QSvgRenderer(str(ROOT / 'assets' / 'scanpaper.svg')).render(painter)
@@ -91,75 +104,92 @@ def prepare_icon():
     image.save(str(png))
     with Image.open(png) as icon:
         icon.save(ROOT / 'assets' / 'scanpaper.ico', sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        icon.save(ROOT / 'assets' / 'scanpaper.icns', format='ICNS')
 
 
-def zip_folder(source, destination):
+def source_archive(destination):
     with zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for path in sorted(source.rglob('*')):
-            if path.is_file():
-                archive.write(path, Path(source.name) / path.relative_to(source))
+        for name in ('scanpaper', 'tests', 'tools', 'assets', 'licenses', '.github'):
+            for path in sorted((ROOT / name).rglob('*')):
+                if path.is_file() and '__pycache__' not in path.parts:
+                    archive.write(path, Path('ScanPaper-source') / path.relative_to(ROOT))
+        for name in ('main.py', 'README.md', '使用说明.txt', 'LICENSE', 'requirements.txt',
+                     'requirements-build.txt', 'ScanPaper.spec', '.gitignore'):
+            archive.write(ROOT / name, Path('ScanPaper-source') / name)
+
+
+def verify_executable(executable, directory, env):
+    directory.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run([str(executable), '--self-test', str(directory)],
+                            cwd=executable.parent, env=env, capture_output=True, timeout=180)
+    (directory / 'process.log').write_bytes(result.stdout + result.stderr)
+    report_path = directory / 'self-test.json'
+    if not report_path.exists():
+        raise RuntimeError(f'Packaged executable exited {result.returncode}; see {directory / "process.log"}')
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    if result.returncode or not report['passed']:
+        raise RuntimeError(f'Packaged self-test failed: {report}')
+    return report
 
 
 def build():
-    if sys.platform != 'win32' or platform.architecture()[0] != '64bit':
-        raise RuntimeError('Build on Windows x64 with Python 3.12.')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--native-smoke', action='store_true', help='Also test the native Qt desktop plugin; Linux needs DISPLAY/Xvfb')
+    parser.add_argument('--skip-source', action='store_true', help='Do not generate a duplicate source ZIP in a build matrix')
+    args = parser.parse_args()
+    target = host_target()
+    print(f'Building ScanPaper {VERSION} for {target.label}', flush=True)
     prepare_licenses()
     prepare_icon()
     run(sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-v')
     run(sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', ROOT / 'ScanPaper.spec')
-    portable = ROOT / 'dist' / 'ScanPaper'
-    shutil.copy2(ROOT / '使用说明.txt', portable / '使用说明.txt')
-    shutil.copy2(ROOT / 'LICENSE', portable / 'LICENSE.txt')
-    shutil.copytree(ROOT / 'licenses', portable / 'licenses', dirs_exist_ok=True)
-    # qwindows is mandatory for normal desktop use; offscreen supports built-in QA.
-    platforms = portable / '_internal' / 'PySide6' / 'plugins' / 'platforms'
-    for name in ('qwindows.dll', 'qoffscreen.dll'):
-        if not (platforms / name).is_file():
-            raise RuntimeError(f'Missing Qt platform plugin: {name}')
-    if any(path.name.lower() in {'icu.dll', 'icuuc.dll', 'icuin.dll', 'icudt.dll', 'icuio.dll'}
-           for path in portable.rglob('*.dll')):
+    portable = ROOT / 'dist' / target.folder
+    if target.system != 'macOS':
+        shutil.copy2(ROOT / '使用说明.txt', portable / '使用说明.txt')
+        shutil.copy2(ROOT / 'LICENSE', portable / 'LICENSE.txt')
+        shutil.copytree(ROOT / 'licenses', portable / 'licenses', dirs_exist_ok=True)
+    else:
+        run('codesign', '--verify', '--deep', '--strict', portable)
+    if not any(portable.rglob(target.plugin)):
+        raise RuntimeError(f'Missing Qt platform plugin: {target.plugin}')
+    if target.system == 'Windows' and any(
+        path.name.lower() in {'icu.dll', 'icuuc.dll', 'icuin.dll', 'icudt.dll', 'icuio.dll'}
+        for path in portable.rglob('*.dll')
+    ):
         raise RuntimeError('A bundled ICU DLL would shadow the Windows system ICU library')
     release = ROOT / 'release'
     release.mkdir(exist_ok=True)
-    archive_path = release / f'{NAME}.zip'
-    zip_folder(portable, archive_path)
-    # Verify the actual ZIP, extracted elsewhere, without Python/venv on PATH.
-    extracted = ROOT / 'artifacts' / f'portable-check-{int(time.time())}'
-    with zipfile.ZipFile(archive_path) as archive:
-        archive.extractall(extracted)
-    executable = extracted / 'ScanPaper' / 'ScanPaper.exe'
-    output = extracted / 'verification'
-    env = {key: value for key, value in os.environ.items()
-           if key.upper() in {'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE',
-                              'APPDATA', 'LOCALAPPDATA', 'COMSPEC'}}
-    env['PATH'] = str(Path(os.environ.get('WINDIR', 'C:/Windows')) / 'System32')
-    env['HTTP_PROXY'] = env['HTTPS_PROXY'] = 'http://127.0.0.1:9'
-    env['QT_QPA_PLATFORM'] = 'offscreen'
-    subprocess.run([str(executable), '--self-test', str(output)], cwd=extracted,
-                   env=env, check=True, timeout=180)
-    result = json.loads((output / 'self-test.json').read_text(encoding='utf-8'))
-    if not result['passed']:
-        raise RuntimeError(result)
-    verification = release / 'verification'
-    shutil.copytree(output, verification, dirs_exist_ok=True)
-    result['environment'] = 'ZIP extracted to a separate directory; system-only PATH; unreachable HTTP/HTTPS proxy'
-    result['versions'] = {name: distribution(name).version for name in PACKAGES}
-    result['python'] = platform.python_version()
-    (verification / 'self-test.json').write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding='utf-8')
-    source_zip = release / 'ScanPaper-1.0.0-source.zip'
-    with zipfile.ZipFile(source_zip, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-        for name in ('scanpaper', 'tests', 'tools', 'assets', 'licenses'):
-            for path in sorted((ROOT / name).rglob('*')):
-                if path.is_file() and '__pycache__' not in path.parts:
-                    archive.write(path, Path('ScanPaper-source') / path.relative_to(ROOT))
-        for name in ('main.py', 'README.md', '使用说明.txt', 'LICENSE', 'requirements.txt', 'requirements-build.txt', 'ScanPaper.spec', '.gitignore'):
-            archive.write(ROOT / name, Path('ScanPaper-source') / name)
+    archive_path = release / f'ScanPaper-{VERSION}-{target.label}{target.suffix}'
+    create_archive(portable, archive_path, target)
+    artifacts = ROOT / 'artifacts'
+    artifacts.mkdir(exist_ok=True)
+    extracted = Path(tempfile.mkdtemp(prefix='portable-check-', dir=artifacts))
+    extract_archive(archive_path, extracted, target)
+    executable = extracted / target.executable
+    env = smoke_environment(target)
+    report = verify_executable(executable, extracted / 'verification', env)
+    if args.native_smoke:
+        env['QT_QPA_PLATFORM'] = target.native_qt_platform
+        verify_executable(executable, extracted / 'verification/native', env)
+        report['native_platform_verified'] = target.native_qt_platform
+    verification = release / 'verification' / target.label
+    shutil.copytree(extracted / 'verification', verification, dirs_exist_ok=True)
+    report['environment'] = 'Archive extracted separately; system-only PATH; unreachable HTTP/HTTPS proxy'
+    report['versions'] = {name: distribution(name).version for name in PACKAGES}
+    report['python'] = platform.python_version()
+    report['target'] = target.label
+    (verification / 'self-test.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    output_files = [archive_path]
+    if not args.skip_source:
+        source_zip = release / f'ScanPaper-{VERSION}-source.zip'
+        source_archive(source_zip)
+        output_files.append(source_zip)
     hashes = []
-    for path in (archive_path, source_zip):
+    for path in output_files:
         with path.open('rb') as stream:
             hashes.append(f'{hashlib.file_digest(stream, "sha256").hexdigest()}  {path.name}')
-    (release / 'SHA256SUMS.txt').write_text('\n'.join(hashes) + '\n', encoding='ascii')
-    print(f'PORTABLE: {archive_path}\nSOURCE: {source_zip}\nSIZE: {archive_path.stat().st_size / 1048576:.1f} MiB', flush=True)
+    (release / f'SHA256SUMS-{target.label}.txt').write_text('\n'.join(hashes) + '\n', encoding='ascii')
+    print(f'PORTABLE: {archive_path}\nSIZE: {archive_path.stat().st_size / 1048576:.1f} MiB', flush=True)
 
 
 if __name__ == '__main__':

@@ -1,6 +1,7 @@
 ScanPaper third-party notices
 
 Application source: MIT (see LICENSE).
+Noto Sans CJK SC: SIL Open Font License 1.1 (see NotoSansCJK/OFL.txt).
 All processing is local. No online service is required.
 
 Runtime components and original license files:
@@ -18,7 +19,7 @@ Python 3.12.13 (PSF license and bundled notices).
 PyInstaller is a build tool; its bootloader distribution exception applies.
 
 Qt / PySide6 / Shiboken6: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only.
-This distribution uses the LGPL option. Libraries are supplied separately in _internal.
+This distribution uses the LGPL option. Libraries are dynamically linked in the application bundle.
 You may replace or relink these libraries and debug modifications under the applicable licenses.
 Application source is supplied in the matching source ZIP. No restriction is imposed on
 reverse engineering for debugging modifications to LGPL-covered libraries.

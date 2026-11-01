@@ -1,13 +1,15 @@
-净页 ScanPaper 1.0 — 使用说明
+净页 ScanPaper 1.1 — 使用说明
 ============================
 
-运行环境：Windows 10 / Windows 11，64 位。
+运行环境：Windows 10 1809+ / Windows 11 x64；macOS 14.4+（Intel / Apple Silicon）；Ubuntu 22.04+ 或兼容的 Linux x64 桌面。
+Linux 需要 glibc 2.35+，以及 X11 或 XWayland 图形环境。
 本软件已包含运行所需依赖，不需要安装 Python、Qt 或其他软件。
 
 【启动】
 1. 将 ZIP 完整解压到任意可访问的文件夹。
-2. 双击 ScanPaper.exe。
-3. 请保留整个文件夹，不要只复制 EXE；_internal 是必需的运行文件。
+2. Windows：双击 ScanPaper.exe。macOS：解压后将 ScanPaper.app 拖到“应用程序”，双击启动。Linux：使用 tar -xzf 解压，运行 ScanPaper/ScanPaper。
+   macOS 当前为临时签名，未做 Apple 公证；首次运行可能需在系统“隐私与安全性”中允许打开。
+3. Windows/Linux 请保留整个文件夹，不要只复制主程序；macOS 请保留整个 .app 应用包。
 
 【扫描件转 PDF】
 1. 点击“导入图片”，选择 JPG / JPEG；也可以拖入一张图片。
@@ -41,5 +43,5 @@
 - 如目标 PDF 正在被其他软件占用，请关闭该文件或另选保存位置。
 - 原文件名、文件夹名可包含中文。
 
-快捷键：Ctrl+O 导入；Ctrl+S 导出。
+快捷键：Windows/Linux 为 Ctrl+O 导入、Ctrl+S 导出；macOS 为 Command+O 导入、Command+S 导出。macOS 使用 Command+滚轮缩放预览。
 第三方许可证与源代码地址见 licenses 文件夹。
