@@ -1,0 +1,43 @@
+ScanPaper third-party notices
+
+Application source: MIT (see LICENSE).
+All processing is local. No online service is required.
+
+Runtime components and original license files:
+PySide6_Essentials 6.12.0
+shiboken6 6.12.0
+Pillow 13.0.0
+numpy 2.5.4
+opencv-python-headless 5.0.0.93
+reportlab 5.1.0
+charset-normalizer 3.5.2
+pyinstaller 6.22.3
+
+Python 3.12.13 (PSF license and bundled notices).
+
+PyInstaller is a build tool; its bootloader distribution exception applies.
+
+Qt / PySide6 / Shiboken6: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only.
+This distribution uses the LGPL option. Libraries are supplied separately in _internal.
+You may replace or relink these libraries and debug modifications under the applicable licenses.
+Application source is supplied in the matching source ZIP. No restriction is imposed on
+reverse engineering for debugging modifications to LGPL-covered libraries.
+
+LGPL-3.0.txt and GPL-3.0.txt contain the complete license texts.
+Corresponding upstream source and build information:
+https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.12.0-src/
+https://code.qt.io/cgit/pyside/pyside-setup.git/?h=v6.12.0
+https://download.qt.io/official_releases/qt/6.12/6.12.0/single/
+https://code.qt.io/cgit/qt/qtbase.git/?h=v6.12.0
+https://code.qt.io/cgit/qt/qtsvg.git/?h=v6.12.0
+https://doc.qt.io/qt-6/licenses-used-in-qt.html
+https://www.python.org/downloads/source/
+https://github.com/python-pillow/Pillow
+https://github.com/numpy/numpy
+https://github.com/opencv/opencv
+https://github.com/opencv/opencv-python
+https://github.com/pyinstaller/pyinstaller
+https://hg.reportlab.com/hg-public/reportlab/
+
+The upstream license files are retained unmodified, including alternative commercial
+license references supplied by upstream. These references do not grant a commercial license.
