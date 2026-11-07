@@ -84,8 +84,20 @@ def run(output_directory):
         make_scan().save(source, quality=96)
         window.show()
         app.processEvents()
+        view = window.view
+        for paper, orientation in ((0, 0), (1, 0), (2, 0), (3, 0), (0, 0), (3, 0), (3, 1), (3, 0)):
+            window.paper_combo.setCurrentIndex(paper)
+            window.orientation_combo.setCurrentIndex(orientation)
+            app.processEvents()
+            viewport_transform = view.viewportTransform()
+            paper_center = viewport_transform.map(view.paper.rect().center())
+            hint_transform = view.hint.deviceTransform(viewport_transform)
+            hint_center = hint_transform.map(view.hint.boundingRect().center())
+            assert view.hint.isVisible() and (hint_center - paper_center).manhattanLength() < 1
+        report['checks'].append('Empty-paper hint stays centered when switching size and orientation')
         window.load_image(str(source))
         wait_until(lambda: not window.busy and window.processed_preview is not None)
+        assert not view.hint.isVisible()
         report['checks'].append('JPEG decode, image plugins, worker cleanup and preview')
         assert window.source.size == (1800, 2400)
         l = window.layout_model

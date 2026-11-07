@@ -40,14 +40,22 @@ class PaperView(QGraphicsView):
         self.has_image = False
         self.drag = None
         self.fitted = True
-        self.hint = QLabel('导入一张扫描件\n\n拖放 JPG 到窗口，或点击「导入图片」', self.viewport())
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint.setStyleSheet('color:#64748b; background:transparent; font-size:15px;')
+        hint_label = QLabel('导入一张扫描件\n\n拖放 JPG 到窗口，或点击「导入图片」')
+        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint_label.setStyleSheet('color:#64748b; background:transparent; font-size:15px;')
+        self.hint = self.scene().addWidget(hint_label)
+        self.hint.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.hint.setAcceptDrops(False)
+        self.hint.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        # Keep the label's center on its scene position at every zoom level.
+        center = self.hint.boundingRect().center()
+        self.hint.setTransform(QTransform.fromTranslate(-center.x(), -center.y()))
         self.update_layout()
 
     def update_layout(self):
         pw, ph = self.layout.paper_size
         self.paper.setRect(0, 0, pw, ph)
+        self.hint.setPos(self.paper.rect().center())
         self.setSceneRect(QRectF(-30, -30, pw + 60, ph + 60))
         r = QRectF(self.layout.x, self.layout.y, self.layout.width, self.layout.height)
         self.image.setPos(r.topLeft())
@@ -95,7 +103,6 @@ class PaperView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.hint.setGeometry(self.viewport().rect())
         if self.fitted:
             self.fit_paper()
 
