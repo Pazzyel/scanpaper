@@ -84,6 +84,14 @@ def run(output_directory):
         make_scan().save(source, quality=96)
         window.show()
         app.processEvents()
+        window.resize(1040, 700)
+        app.processEvents()
+        assert window.left.height() >= window.left.minimumSizeHint().height()
+        assert window.left_scroll.verticalScrollBar().maximum() > 0
+        window.grab().save(str(output / '最小窗口预览.png'))
+        window.resize(1280, 860)
+        app.processEvents()
+        report['checks'].append('Sidebar remains scrollable without squeezing controls at the minimum window size')
         view = window.view
         for paper, orientation in ((0, 0), (1, 0), (2, 0), (3, 0), (0, 0), (3, 0), (3, 1), (3, 0)):
             window.paper_combo.setCurrentIndex(paper)
@@ -156,6 +164,67 @@ def run(output_directory):
         window.checker_check.setChecked(True)
         app.processEvents()
         window.grab().save(str(output / '透明背景预览.png'))
+        # Exercise multiple originals, independent edits and a partial batch failure.
+        from PIL import Image
+        from .processing import Cleanup
+        second = output / '横向扫描件.jpg'
+        window.source.transpose(Image.Transpose.ROTATE_90).save(second, quality=96)
+        broken = output / '损坏图片.jpg'
+        broken.write_bytes(b'broken jpeg')
+        from PySide6.QtCore import QMimeData, QUrl
+        from PySide6.QtGui import QDragEnterEvent, QDropEvent
+        mime = QMimeData()
+        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in (source, second, broken)])
+        drag = QDragEnterEvent(QPoint(400, 300), Qt.DropAction.CopyAction, mime,
+                               Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        window.dragEnterEvent(drag)
+        assert drag.isAccepted()
+        drop = QDropEvent(QPointF(400, 300), Qt.DropAction.CopyAction, mime,
+                          Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+        window.dropEvent(drop)
+        assert drop.isAccepted()
+        wait_until(lambda: not window.busy and window.processed_preview is not None)
+        assert len(window.documents) == 3 and window.document_combo.count() == 3
+        window.background_slider.setValue(62)
+        window.ink_slider.setValue(73)
+        window.fields['width'].setValue(145)
+        window.rotate()
+        first_layout = (window.layout_model.width, window.layout_model.height, window.layout_model.rotation)
+        window.document_combo.setCurrentIndex(1)
+        wait_until(lambda: not window.busy and window.document_index == 1 and window.processed_preview is not None)
+        window.background_slider.setValue(12)
+        window.paper_combo.setCurrentIndex(2)
+        window.document_combo.setCurrentIndex(0)
+        wait_until(lambda: not window.busy and window.document_index == 0 and window.processed_preview is not None)
+        assert window.settings() == Cleanup(62, 73)
+        assert window.layout_model.paper == 'A4'
+        assert first_layout == (window.layout_model.width, window.layout_model.height, window.layout_model.rotation)
+        report['checks'].append('Multi-image import, switching and independent cleanup, paper, size and rotation')
+        expected_errors = []
+        window.operation_failed = lambda error: (expected_errors.append(str(error)), window.set_busy(False, '预期的读取失败'))
+        window.document_combo.setCurrentIndex(2)
+        wait_until(lambda: not window.busy)
+        assert expected_errors and window.document_index == 0 and window.document_combo.currentIndex() == 0
+        assert window.source_path == source and window.settings() == Cleanup(62, 73)
+        report['checks'].append('Failed image switch restores selection and retains the previous document')
+        batch_results = []
+        def batch_ready(folder, result):
+            batch_results.append(result)
+            window.set_busy(False, f'已生成 {len(result.written)} 个 PDF，失败 {len(result.failed)} 张')
+        window.batch_ready = batch_ready
+        batch_folder = output / '批量导出'
+        batch_folder.mkdir(exist_ok=True)
+        window.begin_batch_export(batch_folder)
+        wait_until(lambda: not window.busy)
+        result = batch_results[0]
+        assert len(result.written) == 2 and len(result.failed) == 1
+        assert all(path.read_bytes().startswith(b'%PDF-1.4') for path in result.written)
+        assert result.failed[0][0] == broken
+        assert window.documents[1].settings == Cleanup(12, 45)
+        assert window.documents[1].layout.paper == 'A3'
+        report['checks'].append('Batch worker, progress signals, separate PDFs and continuation after a broken image')
+        app.processEvents()
+        window.grab().save(str(output / '批量导出预览.png'))
         window.close()
         report['passed'] = True
     except Exception:

@@ -40,7 +40,7 @@ class PaperView(QGraphicsView):
         self.has_image = False
         self.drag = None
         self.fitted = True
-        hint_label = QLabel('导入一张扫描件\n\n拖放 JPG 到窗口，或点击「导入图片」')
+        hint_label = QLabel('导入扫描件，可一次选择多张\n\n拖放 JPG 到窗口，或点击「导入图片」')
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint_label.setStyleSheet('color:#64748b; background:transparent; font-size:15px;')
         self.hint = self.scene().addWidget(hint_label)
