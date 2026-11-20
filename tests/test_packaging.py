@@ -5,11 +5,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from scanpaper import __version__
 from tools.packaging_support import (Target, create_archive, extract_archive,
                                      host_target, smoke_environment)
 
 
 class PackagingTests(unittest.TestCase):
+    def test_release_version_matches_tag_version(self):
+        self.assertEqual(__version__, '1.2.0')
+        self.assertIn('ScanPaper 1.2.0', Path('.github/release-notes.md').read_text(encoding='utf-8'))
+
     def test_supported_hosts_have_native_launch_paths(self):
         for system, machine, label, binary, suffix in [
             ('Windows', 'AMD64', 'Windows-x64', 'ScanPaper/ScanPaper.exe', '.zip'),
