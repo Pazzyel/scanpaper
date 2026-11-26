@@ -1,8 +1,8 @@
 # 净页 ScanPaper
 
-Windows、macOS、Linux 中文扫描件清理与单页 PDF 排版工具。离线处理 JPG，保留黑色笔画并将背景转为透明，支持 A1–A4、横纵方向、毫米排版、拖动缩放。
+Windows、macOS、Linux 中文扫描件清理与 PDF 排版工具。离线处理 JPG，保留黑色笔画并将背景转为透明，支持 A1–A4、横纵方向、毫米排版、拖动缩放。
 
-支持一次多选或拖入多张 JPG/JPEG，在图片列表中切换预览；每张图片分别保留清理参数、纸张和排版。点击“批量导出 PDF”选择输出文件夹，每张图片生成一个独立的单页 PDF。同名文件自动编号，个别图片失败后继续处理其余图片，并汇总失败详情。重新导入会替换当前列表。
+可一次多选或拖入多张 JPG/JPEG。点击左侧列表中的页面可预览，并用“上移”“下移”调整页序。每页分别保留清理参数、纸张和排版。点击“导出 PDF”，按列表顺序把所有图片保存为一个 PDF。重新导入会替换当前列表。
 
 [下载免安装版](https://github.com/Pazzyel/scanpaper/releases/latest) · [所有发布版本](https://github.com/Pazzyel/scanpaper/releases) · [跨平台构建状态](https://github.com/Pazzyel/scanpaper/actions/workflows/build.yml)
 
@@ -62,7 +62,7 @@ python main.py --self-test 输出目录
 
 导出使用原图分辨率和当前处理参数；预览使用缩略图，细节可能略有差异。默认保护黑块、细字和标点，不自动删除小连通区域。浅灰污迹与浅色笔画可能需要手动调节。原图和透明棋盘格开关只影响预览。
 
-输入为 JPG/JPEG，单张上限 6400 万像素；输出为单页图像 PDF。不包含 OCR、多页合并、拍摄透视校正、曲面展平或颜色保留。
+输入为 JPG/JPEG，单张上限 6400 万像素。输出为图像 PDF，一张图片对应一页。不包含 OCR、拍摄透视校正、曲面展平或颜色保留。
 
 ## 许可证与 Windows DLL 修复
 

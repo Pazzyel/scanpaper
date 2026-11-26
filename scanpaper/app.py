@@ -2,14 +2,15 @@ from dataclasses import replace
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QRunnable, QSignalBlocker, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSlider, QVBoxLayout, QWidget)
+    QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QListWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+    QSlider, QVBoxLayout, QWidget)
 
 from .canvas import PaperView
-from .batch import Document, export_documents
+from .document import Document, export_documents
 from .platform_support import configure_application, resource_path, zoom_shortcut_label
 from .model import Layout, PAPERS
 from .pdf import export_pdf
@@ -116,26 +117,25 @@ class MainWindow(QMainWindow):
         left = QVBoxLayout(self.left)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(14)
-        file_box = section('01  扫描图片')
-        self.file_label = QLabel('尚未导入图片')
-        self.file_label.setWordWrap(True)
-        self.file_label.setTextFormat(Qt.TextFormat.PlainText)
+        file_box = section('01  PDF 页序')
+        self.page_list = QListWidget()
+        self.page_list.setFixedHeight(96)
+        self.page_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.page_list.setAccessibleName('PDF 页面顺序')
+        self.page_list.currentRowChanged.connect(self.select_document)
+        file_box.layout().addWidget(self.page_list)
+        order_buttons = QHBoxLayout()
+        self.move_up = QPushButton('上移')
+        self.move_down = QPushButton('下移')
+        self.move_up.clicked.connect(lambda: self.move_document(-1))
+        self.move_down.clicked.connect(lambda: self.move_document(1))
+        order_buttons.addWidget(self.move_up)
+        order_buttons.addWidget(self.move_down)
+        file_box.layout().addLayout(order_buttons)
+        self.update_page_buttons()
         self.image_info = QLabel('支持 JPG / JPEG\n本地处理 · 无需联网')
         self.image_info.setObjectName('muted')
-        file_box.layout().addWidget(self.file_label)
         file_box.layout().addWidget(self.image_info)
-        self.document_combo = QComboBox()
-        self.document_combo.setMinimumWidth(0)
-        self.document_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.document_combo.setMinimumContentsLength(10)
-        self.document_combo.setToolTip('切换图片；每张图片分别保留清理参数和排版')
-        self.document_combo.currentIndexChanged.connect(self.select_document)
-        file_box.layout().addWidget(self.document_combo)
-        self.batch_button = QPushButton('批量导出 PDF')
-        self.batch_button.setToolTip('每张图片生成一个单页 PDF，自动避开同名文件')
-        self.batch_button.setEnabled(False)
-        self.batch_button.clicked.connect(self.choose_batch_export)
-        file_box.layout().addWidget(self.batch_button)
         left.addWidget(file_box)
         cleanup_box = section('02  清理背景')
         self.background_slider = self.add_slider(cleanup_box, '背景清理', 35)
@@ -235,7 +235,7 @@ class MainWindow(QMainWindow):
         self.overflow_label.hide()
         right.addWidget(self.overflow_label)
         right.addStretch()
-        export_note = QLabel('原始分辨率导出\n透明背景 · 单页 PDF\n纸张之外的内容会被裁切')
+        export_note = QLabel('原始分辨率导出\n按左侧页序生成一个 PDF\n纸张之外的内容会被裁切')
         export_note.setObjectName('muted')
         right.addWidget(export_note)
         content.addWidget(self.right)
@@ -326,7 +326,7 @@ class MainWindow(QMainWindow):
         self.busy = busy
         self.import_button.setEnabled(not busy)
         self.export_button.setEnabled(not busy and self.source is not None)
-        self.batch_button.setEnabled(not busy and bool(self.documents))
+        self.update_page_buttons()
         self.left.setEnabled(not busy)
         self.right.setEnabled(not busy and self.source is not None)
         self.view.setEnabled(not busy)
@@ -372,6 +372,30 @@ class MainWindow(QMainWindow):
             document.layout = replace(self.layout_model)
             document.settings = self.settings()
 
+    def update_page_buttons(self):
+        self.move_up.setEnabled(not self.busy and self.document_index > 0)
+        self.move_down.setEnabled(not self.busy and 0 <= self.document_index < len(self.documents) - 1)
+
+    def refresh_page_list(self):
+        with QSignalBlocker(self.page_list):
+            self.page_list.clear()
+            for number, document in enumerate(self.documents, 1):
+                item = QListWidgetItem(f'{number}. {document.path.name}')
+                item.setToolTip(str(document.path))
+                self.page_list.addItem(item)
+            self.page_list.setCurrentRow(self.document_index)
+
+    def move_document(self, offset):
+        index = self.document_index
+        target = index + offset
+        if self.busy or index < 0 or not 0 <= target < len(self.documents):
+            return
+        self.save_current_document()
+        self.documents.insert(target, self.documents.pop(index))
+        self.document_index = target
+        self.refresh_page_list()
+        self.update_page_buttons()
+
     def select_document(self, index):
         if self.busy or index < 0 or index == self.document_index:
             return
@@ -387,9 +411,8 @@ class MainWindow(QMainWindow):
         self.set_busy(True, '正在读取扫描图片…')
 
     def load_failed(self, error):
-        self.document_combo.blockSignals(True)
-        self.document_combo.setCurrentIndex(self.document_index)
-        self.document_combo.blockSignals(False)
+        with QSignalBlocker(self.page_list):
+            self.page_list.setCurrentRow(self.document_index)
         self.operation_failed(error)
         self.queue_preview()
 
@@ -399,6 +422,7 @@ class MainWindow(QMainWindow):
         return source, thumbnail(source)
 
     def loaded(self, documents, index, result):
+        new_list = documents is not self.documents
         self.documents = documents
         self.document_index = index
         document = documents[index]
@@ -410,13 +434,8 @@ class MainWindow(QMainWindow):
         if not document.fitted:
             self.layout_model.fit(self.source.width / self.source.height)
             document.fitted = True
-        self.document_combo.blockSignals(True)
-        self.document_combo.clear()
-        for number, entry in enumerate(documents, 1):
-            self.document_combo.addItem(f'{number}. {entry.path.name}')
-            self.document_combo.setItemData(number - 1, str(entry.path), Qt.ItemDataRole.ToolTipRole)
-        self.document_combo.setCurrentIndex(index)
-        self.document_combo.blockSignals(False)
+        if new_list:
+            self.refresh_page_list()
         for widget, value in [(self.background_slider, document.settings.background),
                               (self.ink_slider, document.settings.ink),
                               (self.paper_combo, list(PAPERS).index(self.layout_model.paper)),
@@ -427,9 +446,6 @@ class MainWindow(QMainWindow):
                 widget.blockSignals(False)
             else:
                 widget.setValue(value)
-        self.batch_button.setText(f'批量导出 {len(documents)} 个 PDF')
-        self.file_label.setText(self.source_path.name)
-        self.file_label.setToolTip(str(self.source_path))
         self.image_info.setText(f'{self.source.width:,} × {self.source.height:,} 像素\n原始分辨率保留')
         self.set_busy(False, '图片已导入，正在清理背景…')
         self.view.set_image(rotate_image(self.source_preview, self.layout_model.rotation))
@@ -564,8 +580,10 @@ class MainWindow(QMainWindow):
     def choose_export(self):
         if self.busy or self.source is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, '导出清理后的 PDF',
-            str(self.source_path.with_name(self.source_path.stem + '_清理.pdf')), 'PDF 文件 (*.pdf)')
+        first = self.documents[0].path
+        suffix = '_合并.pdf' if len(self.documents) > 1 else '_清理.pdf'
+        path, _ = QFileDialog.getSaveFileName(self, f'导出 PDF（{len(self.documents)} 页）',
+            str(first.with_name(first.stem + suffix)), 'PDF 文件 (*.pdf)')
         if not path:
             return
         if Path(path).suffix.lower() != '.pdf':
@@ -576,44 +594,24 @@ class MainWindow(QMainWindow):
                 return
         self.begin_export(path)
 
-    def choose_batch_export(self):
-        if self.busy or not self.documents:
-            return
-        folder = QFileDialog.getExistingDirectory(self, '选择批量 PDF 的保存文件夹', str(self.source_path.parent))
-        if folder:
-            self.begin_batch_export(folder)
-
-    def begin_batch_export(self, folder):
-        if self.busy or not self.documents:
-            return
-        self.save_current_document()
-        documents = [replace(document, layout=replace(document.layout)) for document in self.documents]
-        self.set_busy(True, f'正在批量导出 0/{len(documents)}…')
-        self.progress.setRange(0, len(documents))
-        self.progress.setValue(0)
-        job = Job(lambda: export_documents(documents, folder, job.signals.progress.emit))
-        self.run_job(self.io_pool, job, lambda result: self.batch_ready(folder, result),
-                     self.operation_failed, self.batch_progress)
-
-    def batch_progress(self, progress):
-        completed, total, name = progress
+    def export_progress(self, completed):
         self.progress.setValue(completed)
-        self.status.setText(f'正在批量导出 {completed}/{total}：{name}')
-
-    def batch_ready(self, folder, result):
-        summary = f'已生成 {len(result.written)} 个 PDF，失败 {len(result.failed)} 张。'
-        self.set_busy(False, summary)
-        message = QMessageBox(self)
-        message.setWindowTitle('批量导出结果')
-        message.setIcon(QMessageBox.Icon.Warning if result.failed else QMessageBox.Icon.Information)
-        message.setTextFormat(Qt.TextFormat.PlainText)
-        message.setText(f'{summary}\n保存位置：{folder}\n每张图片对应一个 PDF，同名文件已自动编号。')
-        if result.failed:
-            message.setDetailedText('\n\n'.join(f'{path}\n{explain_error(error)}' for path, error in result.failed))
-        message.exec()
+        self.status.setText(f'正在导出 PDF · {completed}/{self.progress.maximum()} 页')
 
     def begin_export(self, path):
         if self.busy or self.source is None:
+            return
+        if len(self.documents) > 1:
+            self.save_current_document()
+            documents = [replace(document, layout=replace(document.layout)) for document in self.documents]
+            self.set_busy(True, f'正在导出 PDF · 0/{len(documents)} 页')
+            self.progress.setRange(0, len(documents))
+            self.progress.setValue(0)
+            def write_pages():
+                export_documents(documents, path, job.signals.progress.emit)
+                return str(path)
+            job = Job(write_pages)
+            self.run_job(self.io_pool, job, self.export_ready, self.operation_failed, self.export_progress)
             return
         source, settings, layout = self.source, self.settings(), replace(self.layout_model)
         self.set_busy(True, '正在以原始分辨率清理并生成 PDF，请稍候…')

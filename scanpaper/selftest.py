@@ -164,17 +164,19 @@ def run(output_directory):
         window.checker_check.setChecked(True)
         app.processEvents()
         window.grab().save(str(output / '透明背景预览.png'))
-        # Exercise multiple originals, independent edits and a partial batch failure.
-        from PIL import Image
+        import re
+        from PIL import Image, ImageDraw
         from .processing import Cleanup
         second = output / '横向扫描件.jpg'
-        window.source.transpose(Image.Transpose.ROTATE_90).save(second, quality=96)
-        broken = output / '损坏图片.jpg'
-        broken.write_bytes(b'broken jpeg')
+        with Image.new('RGB', (2400, 1800), 'white') as landscape:
+            drawing = ImageDraw.Draw(landscape)
+            drawing.rectangle((260, 220, 2140, 1550), outline='black', width=12)
+            drawing.text((350, 340), 'Landscape scan', fill='black', font_size=100)
+            landscape.save(second, quality=96)
         from PySide6.QtCore import QMimeData, QUrl
         from PySide6.QtGui import QDragEnterEvent, QDropEvent
         mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in (source, second, broken)])
+        mime.setUrls([QUrl.fromLocalFile(str(path)) for path in (source, second)])
         drag = QDragEnterEvent(QPoint(400, 300), Qt.DropAction.CopyAction, mime,
                                Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
         window.dragEnterEvent(drag)
@@ -184,47 +186,58 @@ def run(output_directory):
         window.dropEvent(drop)
         assert drop.isAccepted()
         wait_until(lambda: not window.busy and window.processed_preview is not None)
-        assert len(window.documents) == 3 and window.document_combo.count() == 3
+        assert len(window.documents) == 2 and window.page_list.count() == 2
         window.background_slider.setValue(62)
         window.ink_slider.setValue(73)
         window.fields['width'].setValue(145)
-        window.rotate()
-        first_layout = (window.layout_model.width, window.layout_model.height, window.layout_model.rotation)
-        window.document_combo.setCurrentIndex(1)
+        first_layout = (window.layout_model.width, window.layout_model.height)
+        window.page_list.setCurrentRow(1)
         wait_until(lambda: not window.busy and window.document_index == 1 and window.processed_preview is not None)
         window.background_slider.setValue(12)
         window.paper_combo.setCurrentIndex(2)
-        window.document_combo.setCurrentIndex(0)
-        wait_until(lambda: not window.busy and window.document_index == 0 and window.processed_preview is not None)
+        window.orientation_combo.setCurrentIndex(1)
+        window.fit_image()
+        window.move_up.click()
+        assert window.document_index == 0 and window.page_list.currentRow() == 0
+        assert window.source_path == second and window.settings() == Cleanup(12, 45)
+        assert window.documents[0].path == second
+        assert window.page_list.item(0).text().startswith('1. 横向')
+        window.page_list.setCurrentRow(1)
+        wait_until(lambda: not window.busy and window.document_index == 1 and window.processed_preview is not None)
         assert window.settings() == Cleanup(62, 73)
         assert window.layout_model.paper == 'A4'
-        assert first_layout == (window.layout_model.width, window.layout_model.height, window.layout_model.rotation)
-        report['checks'].append('Multi-image import, switching and independent cleanup, paper, size and rotation')
+        assert first_layout == (window.layout_model.width, window.layout_model.height)
+        window.move_up.click()
+        window.move_down.click()
+        assert [document.path for document in window.documents] == [second, source]
+        report['checks'].append('Multi-image import, page reordering and independent cleanup and paper settings')
+        window.checker_check.setChecked(False)
+        window.grab().save(str(output / '多页排序预览.png'))
+
+        destination = output / '多页导出.pdf'
+        window.begin_export(destination)
+        wait_until(lambda: not window.busy)
+        pdf = destination.read_bytes()
+        assert pdf.startswith(b'%PDF-1.4')
+        boxes = re.findall(rb'/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]', pdf)
+        assert len(boxes) == 2 and float(boxes[0][0]) > float(boxes[1][0])
+        assert float(boxes[0][0]) > float(boxes[0][1]) and float(boxes[1][0]) < float(boxes[1][1])
+        report['checks'].append('The standard export button workflow saves one PDF in the displayed page order')
+
+        second.write_bytes(b'broken jpeg')
         expected_errors = []
         window.operation_failed = lambda error: (expected_errors.append(str(error)), window.set_busy(False, '预期的读取失败'))
-        window.document_combo.setCurrentIndex(2)
+        window.page_list.setCurrentRow(0)
         wait_until(lambda: not window.busy)
-        assert expected_errors and window.document_index == 0 and window.document_combo.currentIndex() == 0
+        assert expected_errors and window.document_index == 1 and window.page_list.currentRow() == 1
         assert window.source_path == source and window.settings() == Cleanup(62, 73)
         report['checks'].append('Failed image switch restores selection and retains the previous document')
-        batch_results = []
-        def batch_ready(folder, result):
-            batch_results.append(result)
-            window.set_busy(False, f'已生成 {len(result.written)} 个 PDF，失败 {len(result.failed)} 张')
-        window.batch_ready = batch_ready
-        batch_folder = output / '批量导出'
-        batch_folder.mkdir(exist_ok=True)
-        window.begin_batch_export(batch_folder)
+        expected_errors.clear()
+        window.begin_export(destination)
         wait_until(lambda: not window.busy)
-        result = batch_results[0]
-        assert len(result.written) == 2 and len(result.failed) == 1
-        assert all(path.read_bytes().startswith(b'%PDF-1.4') for path in result.written)
-        assert result.failed[0][0] == broken
-        assert window.documents[1].settings == Cleanup(12, 45)
-        assert window.documents[1].layout.paper == 'A3'
-        report['checks'].append('Batch worker, progress signals, separate PDFs and continuation after a broken image')
-        app.processEvents()
-        window.grab().save(str(output / '批量导出预览.png'))
+        assert expected_errors and '第 1 页（横向扫描件.jpg）' in expected_errors[0]
+        assert destination.read_bytes() == pdf
+        report['checks'].append('A failed page preserves the previous PDF and reports the page number')
         window.close()
         report['passed'] = True
     except Exception:
